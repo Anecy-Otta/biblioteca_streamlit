@@ -24,7 +24,6 @@ MESES_PT = {
 }
 
 def periodo_para_label(periodo: str) -> str:
-    """Converte '01-2026' → 'Janeiro/2026'"""
     try:
         mes, ano = periodo.split("-")
         return f"{MESES_PT.get(mes, mes)}/{ano}"
@@ -58,7 +57,6 @@ def carregar_dados():
 
     pasta = Path("dados")
 
-    # Ordena pelos arquivos — MM-YYYY ordena corretamente como string
     arquivos = sorted(pasta.glob("BH *.xlsx"))
 
     if not arquivos:
@@ -69,17 +67,13 @@ def carregar_dados():
 
     for arquivo in arquivos:
 
-        # "BH 01-2026" → "01-2026"
         periodo = arquivo.stem.replace("BH ", "").strip()
 
         try:
             df_arquivo = pd.read_excel(arquivo, header=6)
             df_arquivo["Período"] = periodo
-
-            # Cria coluna de label legível: "Janeiro/2026"
             df_arquivo["Período Label"] = periodo_para_label(periodo)
 
-            # Cria coluna de data para ordenação cronológica correta
             mes, ano = periodo.split("-")
             df_arquivo["Período Data"] = pd.Timestamp(
                 year=int(ano), month=int(mes), day=1
@@ -103,11 +97,9 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# Remove linhas sem matrícula
 if "CHAPA" in df.columns:
     df = df.dropna(subset=["CHAPA"])
 
-# Converte saldo
 df["Saldo Decimal"] = df["SALDO\nATUAL"].apply(saldo_para_decimal)
 
 # ==================================================
@@ -121,7 +113,7 @@ st.markdown(
 )
 
 # ==================================================
-# FILTROS NO TOPO
+# FILTROS
 # ==================================================
 
 st.subheader("Filtros")
@@ -129,7 +121,6 @@ st.subheader("Filtros")
 col_f1, col_f2, col_f3 = st.columns(3)
 
 with col_f1:
-    # Ordena pelos períodos em ordem cronológica
     periodos_disponiveis = (
         df[["Período", "Período Label", "Período Data"]]
         .drop_duplicates()
@@ -177,7 +168,6 @@ if funcionario != "Todos":
 
 st.divider()
 
-# Guard clause — antes de qualquer KPI ou gráfico
 if df_filtrado.empty:
     st.warning(
         "Nenhum registro encontrado para os filtros selecionados."
@@ -227,22 +217,10 @@ grafico_func = (
 st.bar_chart(grafico_func)
 
 # ==================================================
-# GRÁFICO POR SETOR
+# EVOLUÇÃO MENSAL — ordem cronológica crescente
 # ==================================================
 
-st.subheader("Saldo Médio por Setor")
-
-grafico_setor = (
-    df_filtrado.groupby("SEÇÃO")["Saldo Decimal"]
-    .mean()
-    .sort_values(ascending=False)
-)
-
-st.bar_chart(grafico_setor)
-
-# ==================================================
-# EVOLUÇÃO MENSAL — ordenada cronologicamente
-# ==================================================
+import altair as alt
 
 st.subheader("Evolução Mensal do Banco de Horas")
 
@@ -252,12 +230,32 @@ evolucao = (
     )["Saldo Decimal"]
     .mean()
     .reset_index()
-    .sort_values("Período Data")        # garante ordem cronológica
-    .set_index("Período Label")         # rótulo legível no eixo X
-    ["Saldo Decimal"]
+    .sort_values("Período Data", ascending=True)
 )
 
-st.line_chart(evolucao)
+# Lista de meses na ordem correta para forçar o eixo X
+ordem_meses = evolucao["Período Label"].tolist()
+
+grafico_evolucao = (
+    alt.Chart(evolucao)
+    .mark_line(point=True)
+    .encode(
+        x=alt.X(
+            "Período Label:N",
+            sort=ordem_meses,          # força a ordem cronológica
+            title="Período",
+            axis=alt.Axis(labelAngle=-45)
+        ),
+        y=alt.Y(
+            "Saldo Decimal:Q",
+            title="Saldo Médio (h)"
+        ),
+        tooltip=["Período Label", "Saldo Decimal"]
+    )
+    .properties(height=400)
+)
+
+st.altair_chart(grafico_evolucao, use_container_width=True)
 
 # ==================================================
 # RANKING
@@ -266,7 +264,7 @@ st.line_chart(evolucao)
 col_esq, col_dir = st.columns(2)
 
 with col_esq:
-    st.subheader("🏆 Top 5 Maiores Saldos")
+    st.subheader("Funcionários com Maior Saldo")
 
     top5 = (
         df_filtrado
@@ -279,7 +277,7 @@ with col_esq:
     st.table(top5)
 
 with col_dir:
-    st.subheader("⚠️ Top 5 Menores Saldos")
+    st.subheader("Funcionários com Menor Saldo")
 
     bottom5 = (
         df_filtrado
